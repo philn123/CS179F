@@ -46,9 +46,18 @@ sys_sbrk(void)
 
   if(argint(0, &n) < 0)
     return -1;
+
   addr = myproc()->sz;
-  
-  myproc()->sz += n; //increase process size
+
+  if (n > 0)
+  {
+    myproc()->sz += n; //increase process size
+  }
+  else 
+  {
+    growproc(n);  //this will release it
+  }
+
   return addr;
 }
 
