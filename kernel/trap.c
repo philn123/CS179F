@@ -68,9 +68,30 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
+      uint64 pf_dectector = r_scause();
+      if(pf_dectector == 15 || pf_dectector == 13){
+        char *mem = kalloc();
+        uint64 va = PGROUNDDOWN(r_stval());
+        if(r_stval() > p->sz){
+          printf("accessing out of bound, error\n");
+          p->killed = 1;
+        }
+        if(mem == 0){
+          printf("mem alocating error\n");
+          p->killed = 1;
+        }
+        memset(mem, 0, PGSIZE);
+        
+        if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U)!= 0){
+          p->killed = 1;
+        }
+      }
+      else{
+        printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+        printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+        p->killed = 1;
+      }
+      
   }
 
   if(p->killed)
