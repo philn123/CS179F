@@ -43,19 +43,26 @@ sys_sbrk(void)
 {
   int addr;
   int n;
+  uint sz;
 
   if(argint(0, &n) < 0)
     return -1;
 
   addr = myproc()->sz;
 
-  if (n > 0)
+  if(myproc()->sz + n > MAXVA)
   {
-    myproc()->sz += n; //increase process size
+    return -1;
   }
-  else 
+
+  myproc()->sz += n; //increase process size
+
+  if (n < 0)
   {
-    growproc(n);  //this will release it
+    if((sz = uvmdealloc(myproc()->pagetable, addr, myproc()->sz)) == 0)
+    {
+      return -1;
+    }
   }
 
   return addr;

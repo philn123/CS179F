@@ -71,14 +71,9 @@ usertrap(void)
   else {
     if(r_scause() == 13 || r_scause() == 15) 
     {
-      uint64 fault_virtual_address = r_stval();
+      uint64 fault_virtual_address = (uint64)r_stval();
 
-      if (fault_virtual_address >= p->sz)
-      {
-        p->killed = 1;
-        goto exit;
-      }
-      else if(fault_virtual_address < p->tf->sp)
+      if (fault_virtual_address >= p->sz || fault_virtual_address <= p->tf->sp)
       {
         p->killed = 1;
         goto exit;
