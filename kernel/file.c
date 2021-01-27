@@ -30,13 +30,13 @@ struct file*
 filealloc(void)
 {
   acquire(&ftable.lock);
-  struct file *p = bd_malloc(FILESIZE);
+  struct file *p = bd_malloc(sizeof(struct file));
 
   if(p == 0){
     release(&ftable.lock);
     return 0;
   }
-  memset(p,0,FILESIZE);
+  memset(p,0,sizeof(struct file));
   p->ref = 1;
   release(&ftable.lock);
   return p;

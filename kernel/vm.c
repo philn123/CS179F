@@ -5,7 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-
+#include "spinlock.h"
+#include "proc.h"
 /*
  * the kernel's page table.
  */
@@ -374,6 +375,12 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
+
+    if (pa0 + (dstva - va0) > MAXVA)
+    {
+      return -1;
+    }
+
     memmove((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;
@@ -399,6 +406,12 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
+    
+    if (pa0 + (srcva - va0) > MAXVA)
+    {
+      return -1;
+    }
+
     memmove(dst, (void *)(pa0 + (srcva - va0)), n);
 
     len -= n;
@@ -426,6 +439,11 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     n = PGSIZE - (srcva - va0);
     if(n > max)
       n = max;
+
+    if (pa0 + (srcva - va0) > MAXVA)
+    {
+      return -1;
+    }
 
     char *p = (char *) (pa0 + (srcva - va0));
     while(n > 0){
