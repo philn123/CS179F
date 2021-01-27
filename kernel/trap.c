@@ -81,7 +81,7 @@ usertrap(void)
 
       char *mem = kalloc();
 
-      if (mem <= 0)
+      if (mem == 0)
       {
         p->killed = 1;
         goto exit;
