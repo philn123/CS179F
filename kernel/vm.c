@@ -404,7 +404,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     if(n > len)
       n = len;
 
-    if (pa0 + (dstva - va0) > MAXVA && pa0 + (dstva - va0) < 0)
+    if (pa0 + (dstva - va0) > MAXVA || pa0 + (dstva - va0) < 0)
     {
       return -1;
     }
@@ -462,7 +462,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     if(n > len)
       n = len;
     
-    if (pa0 + (srcva - va0) > MAXVA && pa0 + (srcva - va0) < 0)
+    if (pa0 + (srcva - va0) > MAXVA || pa0 + (srcva - va0) < 0)
     {
       return -1;
     }
@@ -522,7 +522,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     if(n > max)
       n = max;
 
-    if (pa0 + (srcva - va0) > MAXVA && pa0 + (srcva - va0) < 0)
+    if (pa0 + (srcva - va0) > MAXVA || pa0 + (srcva - va0) < 0)
     {
       return -1;
     }
