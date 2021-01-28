@@ -189,7 +189,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
       goto end1;
       // panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0){
-      goto end2;
+      goto end1;
       // printf("va=%p pte=%p\n", a, *pte);
       // panic("uvmunmap: not mapped");
     }
@@ -199,7 +199,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
       pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
-    end2:
+
     *pte = 0;
     end1:
     if(a == last)
@@ -376,7 +376,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
       struct proc* p = myproc();
       uint64 round_fva = PGROUNDDOWN(va0);
 
-      if (va0 >= p->sz || va0 <= PGROUNDDOWN(p->tf->sp) || round_fva >= MAXVA)
+      if (va0 >= p->sz || va0 <= p->tf->sp || round_fva >= MAXVA)
       {
         return -1;
       }
@@ -404,7 +404,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     if(n > len)
       n = len;
 
-    if (pa0 + (dstva - va0) > MAXVA)
+    if (pa0 + (dstva - va0) > MAXVA && pa0 + (dstva - va0) < 0)
     {
       return -1;
     }
@@ -435,7 +435,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
       struct proc* p = myproc();
       uint64 round_fva = PGROUNDDOWN(va0);
 
-      if (va0 >= p->sz || va0 <= PGROUNDDOWN(p->tf->sp) || round_fva >= MAXVA)
+      if (va0 >= p->sz || va0 <= p->tf->sp || round_fva >= MAXVA)
       {
         return -1;
       }
@@ -462,7 +462,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     if(n > len)
       n = len;
     
-    if (pa0 + (srcva - va0) > MAXVA)
+    if (pa0 + (srcva - va0) > MAXVA && pa0 + (srcva - va0) < 0)
     {
       return -1;
     }
@@ -495,7 +495,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
       struct proc* p = myproc();
       uint64 round_fva = PGROUNDDOWN(va0);
 
-      if (va0 >= p->sz || va0 <= PGROUNDDOWN(p->tf->sp) || round_fva >= MAXVA)
+      if (va0 >= p->sz || va0 <= p->tf->sp || round_fva >= MAXVA)
       {
         return -1;
       }
@@ -522,7 +522,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     if(n > max)
       n = max;
 
-    if (pa0 + (srcva - va0) > MAXVA)
+    if (pa0 + (srcva - va0) > MAXVA && pa0 + (srcva - va0) < 0)
     {
       return -1;
     }

@@ -48,10 +48,10 @@ sys_sbrk(void)
     return -1;
   addr = myproc()->sz;
 
-  if (addr + n > PHYSTOP)
-  {
-    return -1;
-  }
+  // if (addr + n > MAXVA)
+  // {
+  //   return -1;
+  // }
 
   if(n < 0){
     if(growproc(n) < 0)
@@ -63,6 +63,12 @@ sys_sbrk(void)
   {
     myproc()->sz += n;
   }
+
+  if (myproc()->sz > MAXVA && myproc()->sz < 0)
+  {
+    return -1;
+  }
+
   
   return addr;
 }
