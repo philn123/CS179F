@@ -370,8 +370,36 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   while(len > 0){
     va0 = (uint)PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
+
     if(pa0 == 0)
-      return -1;
+    {
+      struct proc* p = myproc();
+      uint64 round_fva = PGROUNDDOWN(va0);
+
+      if (va0 >= p->sz || va0 <= PGROUNDDOWN(p->tf->sp) || round_fva >= MAXVA)
+      {
+        return -1;
+      }
+
+      char* mem = kalloc();
+
+      if (mem == 0)
+      {
+        return -1;
+      }
+
+      memset(mem, 0, PGSIZE);
+
+      if(mappages(p->pagetable, round_fva, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0)
+      {
+        kfree(mem);
+        return -1;
+      }
+
+      pa0 = (uint64) mem;
+
+    }
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -401,8 +429,35 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   while(len > 0){
     va0 = (uint)PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
+
     if(pa0 == 0)
-      return -1;
+    {
+      struct proc* p = myproc();
+      uint64 round_fva = PGROUNDDOWN(va0);
+
+      if (va0 >= p->sz || va0 <= PGROUNDDOWN(p->tf->sp) || round_fva >= MAXVA)
+      {
+        return -1;
+      }
+
+      char* mem = kalloc();
+
+      if (mem == 0)
+      {
+        return -1;
+      }
+
+      memset(mem, 0, PGSIZE);
+
+      if(mappages(p->pagetable, round_fva, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0)
+      {
+        kfree(mem);
+        return -1;
+      }
+
+      pa0 = (uint64) mem;
+    }
+
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
@@ -434,8 +489,35 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   while(got_null == 0 && max > 0){
     va0 = (uint)PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
+    
     if(pa0 == 0)
-      return -1;
+    {
+      struct proc* p = myproc();
+      uint64 round_fva = PGROUNDDOWN(va0);
+
+      if (va0 >= p->sz || va0 <= PGROUNDDOWN(p->tf->sp) || round_fva >= MAXVA)
+      {
+        return -1;
+      }
+
+      char* mem = kalloc();
+
+      if (mem == 0)
+      {
+        return -1;
+      }
+
+      memset(mem, 0, PGSIZE);
+
+      if(mappages(p->pagetable, round_fva, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0)
+      {
+        kfree(mem);
+        return -1;
+      }
+
+      pa0 = (uint64) mem;
+    }
+
     n = PGSIZE - (srcva - va0);
     if(n > max)
       n = max;
