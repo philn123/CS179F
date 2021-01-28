@@ -64,7 +64,7 @@ sys_sbrk(void)
     myproc()->sz += n;
   }
 
-  if (myproc()->sz > MAXVA && myproc()->sz < 0)
+  if (myproc()->sz > MAXVA || myproc()->sz < 0)
   {
     return -1;
   }
