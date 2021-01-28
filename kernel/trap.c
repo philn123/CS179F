@@ -73,7 +73,7 @@ usertrap(void)
       uint64 fault_va = r_stval();
       uint64 round_fva = PGROUNDDOWN(fault_va);
 
-      if (fault_va >= p->sz || fault_va <= PGROUNDDOWN(p->tf->sp) || round_fva >= MAXVA)
+      if (fault_va >= p->sz || fault_va <= p->tf->sp || round_fva >= MAXVA)
       {
         p->killed = 1;
         goto exit;
@@ -95,7 +95,6 @@ usertrap(void)
         p->killed = 1;
         goto exit;
       }
-
     }
     else
     {
