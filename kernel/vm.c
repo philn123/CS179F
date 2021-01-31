@@ -495,6 +495,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     va0 = (uint)PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
     
+    // if walkaddr fails to find physical address, we create it
     if(pa0 == 0)
     {
       struct proc* p = myproc();

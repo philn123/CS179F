@@ -68,11 +68,15 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
+
+    // checking if page fault that we handle
     if (r_scause() == 13 || r_scause() == 15)
     {
       uint64 fault_va = r_stval();
       uint64 round_fva = PGROUNDDOWN(fault_va);
 
+
+      // making sure fault addr is in correct boundaries
       if (fault_va >= p->sz || fault_va <= p->tf->sp || round_fva >= MAXVA)
       {
         p->killed = 1;
