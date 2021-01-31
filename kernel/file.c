@@ -36,7 +36,7 @@ filealloc(void)
     release(&ftable.lock);
     return 0;
   }
-  memset(p,0,sizeof(FILESIZE));
+  memset(p,0,FILESIZE);
   p->ref = 1;
   release(&ftable.lock);
   return p;
