@@ -373,7 +373,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   uint64 n, va0, pa0;
 
   while(len > 0){
-    va0 = (uint64)PGROUNDDOWN(dstva);
+    va0 = (uint)PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
 
     if(pa0 == 0)
@@ -432,7 +432,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
   uint64 n, va0, pa0;
 
   while(len > 0){
-    va0 = (uint64)PGROUNDDOWN(srcva);
+    va0 = (uint)PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
 
     if(pa0 == 0)
@@ -492,7 +492,7 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   int got_null = 0;
 
   while(got_null == 0 && max > 0){
-    va0 = (uint64)PGROUNDDOWN(srcva);
+    va0 = (uint)PGROUNDDOWN(srcva);
     pa0 = walkaddr(pagetable, va0);
     
     if(pa0 == 0)

@@ -434,6 +434,7 @@ sys_exec(void)
     if(argv[i] == 0)
       panic("sys_exec kalloc");
     if(fetchstr(uarg, argv[i], PGSIZE) < 0){
+      kfree(argv[i]);
       return -1;
     }
   }
