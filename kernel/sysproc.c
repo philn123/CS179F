@@ -48,12 +48,9 @@ sys_sbrk(void)
     return -1;
   addr = myproc()->sz;
 
-  // if (addr + n > MAXVA)
-  // {
-  //   return -1;
-  // }
-
   if(n < 0){
+
+    // Deallocate mem if sbrk arg is neg
     if(growproc(n) < 0)
     {
       return -1;
@@ -61,9 +58,13 @@ sys_sbrk(void)
   }
   else
   {
+    // if valid increase size
     myproc()->sz += n;
   }
 
+  // checking if after size increase, 
+  // the process location is valid
+  
   if (myproc()->sz > MAXVA || myproc()->sz < 0)
   {
     return -1;
