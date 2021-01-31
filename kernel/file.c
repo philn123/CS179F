@@ -16,7 +16,7 @@
 struct devsw devsw[NDEV];
 struct {
   struct spinlock lock;
-  struct file file[NFILE];
+
 } ftable;
 
 void
@@ -29,18 +29,17 @@ fileinit(void)
 struct file*
 filealloc(void)
 {
-  struct file *f;
-
   acquire(&ftable.lock);
-  for(f = ftable.file; f < ftable.file + NFILE; f++){
-    if(f->ref == 0){
-      f->ref = 1;
-      release(&ftable.lock);
-      return f;
-    }
+  struct file *p = bd_malloc(sizeof(struct file));
+
+  if(p == 0){
+    release(&ftable.lock);
+    return 0;
   }
+  memset(p,0,sizeof(struct file));
+  p->ref = 1;
   release(&ftable.lock);
-  return 0;
+  return p;
 }
 
 // Increment ref count for file f.
@@ -60,7 +59,6 @@ void
 fileclose(struct file *f)
 {
   struct file ff;
-
   acquire(&ftable.lock);
   if(f->ref < 1)
     panic("fileclose");
@@ -80,6 +78,8 @@ fileclose(struct file *f)
     iput(ff.ip);
     end_op(ff.ip->dev);
   }
+  
+  bd_free(f);
 }
 
 // Get metadata about file f.
