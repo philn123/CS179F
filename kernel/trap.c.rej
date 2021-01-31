@@ -1,0 +1,48 @@
+diff a/kernel/trap.c b/kernel/trap.c	(rejected hunks)
+@@ -68,11 +68,43 @@ usertrap(void)
+   } else if((which_dev = devintr()) != 0){
+     // ok
+   } else {
+-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+-    p->killed = 1;
++    if (r_scause() == 13 || r_scause() == 15)
++    {
++      uint64 fault_va = r_stval();
++      uint64 round_fva = PGROUNDDOWN(fault_va);
++
++      if (fault_va >= p->sz || fault_va < PGROUNDUP(p->tf->sp))
++      {
++        p->killed = 1;
++        goto exit;
++      }
++
++      char *mem = kalloc();
++
++      if (mem == 0)
++      {
++        p->killed = 1;
++        goto exit;
++      }
++
++      memset(mem, 0, PGSIZE);
++
++      if(mappages(p->pagetable, round_fva, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0)
++      {
++        kfree(mem);
++        p->killed = 1;
++        goto exit;
++      }
++    }
++    else
++    {
++      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
++      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
++      p->killed = 1;
++    }
+   }
+ 
++  exit:
+   if(p->killed)
+     exit(-1);
+ 
