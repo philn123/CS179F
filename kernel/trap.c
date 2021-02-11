@@ -67,12 +67,62 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  }else if(r_scause() == 15){
+    pte_t *pte;
+    uint64 pa, i;
+    uint flags;
+    for(i = 0; i < p->sz; i += PGSIZE){
+      
+      if((pte= walk(p->pagetable, i, 0)) == 0){
+        printf("usertrap: pte should exist");
+        p->killed = 1;
+        goto done;
+      }
+      // if(i > MAXVA || (*pte & PTE_U) == 0){
+      //   printf("usertrap: bound check error\n");
+      //   p->killed = 1;
+      //   goto done;
+      // }  
+      if((*pte & PTE_V) == 0){
+        printf("usertrap: page not present");
+        p->killed = 1;
+        goto done;
+      }
+      pa = PTE2PA(*pte);
+      if(getref((void *)pa) == 1){
+        *pte |= PTE_W; // if only 1 ref on memory, give write flag
+      }
+      else if(getref((void *)pa) > 1){ // if there are already references in the physical address
+        char* mem;
+        if((mem = kalloc()) == 0){ // allocate the memory
+          printf("allocation error in usertrap");
+          goto done;
+        }
+        decref((void *)pa); // lower the current location by 1
+        memmove(mem, (char*)pa, PGSIZE);
+        //*pte |= PTE_W; // add the writeable flag
+        flags = PTE_FLAGS(*pte);
+        flags |= PTE_W;
+        uvmunmap(p->pagetable, i, PGSIZE, 0);
+        if(mappages(p->pagetable, i, PGSIZE, (uint64)mem, flags) != 0){
+          kfree(mem);
+          p->killed = 1;
+          goto done;
+        }
+      }
+      else{
+        printf("USERTRAP: ref in physical counter is %d \n", getref((void *)pa));   
+        p->killed = 1;
+        goto done;
+      }
+    }
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
-
+  done:
   if(p->killed)
     exit(-1);
 

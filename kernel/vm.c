@@ -6,6 +6,7 @@
 #include "defs.h"
 #include "fs.h"
 
+
 /*
  * the kernel's page table.
  */
@@ -75,7 +76,7 @@ kvminithart()
 //   21..39 -- 9 bits of level-1 index.
 //   12..20 -- 9 bits of level-0 index.
 //    0..12 -- 12 bits of byte offset within the page.
-static pte_t *
+pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
   if(va >= MAXVA)
@@ -322,7 +323,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -330,14 +330,16 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    *pte &= ~PTE_W; // parent becomes read only
+    flags = PTE_FLAGS(*pte); // child becomes read only
+    // if((mem = kalloc()) == 0)  // no longer allocates
+    //   goto err;
+    // memmove(mem, (char*)pa, PGSIZE);
+    
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    incref((void *)pa);
   }
   return 0;
 
@@ -365,13 +367,43 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0, pa0;
+  uint64 n, va0 ,pa0;
 
+  pte_t *pte;
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    pte = (void *)PA2PTE(pa0);
+    if(r_scause() == 15){ // dstva doesn't have writing privilages
+      if(getref((void *) pa0) == 1){
+        *pte |= PTE_W;
+      }
+      else if(getref((void *) pa0) > 1){
+        char* mem;
+        if((mem = kalloc()) == 0){
+          printf("allocation error in copyout \n");
+          return -1;
+        }
+        decref((void *)pa0);
+        memmove(mem, (char*)pa0, PGSIZE);
+        uint flags = PTE_FLAGS(*pte);
+        flags |= PTE_W;
+        uvmunmap(pagetable, va0, PGSIZE, 0);
+        if(mappages(pagetable, va0, PGSIZE, (uint64)mem, flags) != 0){
+          printf("mappages error in copyout\n");
+          return -1;
+        }
+      }
+      else{
+        printf("copyout getref returned negative number for pa0\n");
+        return -1;
+      }
+
+        
+
+    }
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
