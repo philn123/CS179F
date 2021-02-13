@@ -372,8 +372,12 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
-    if(r_scause() == 15){
-      pte = walk(pagetable, va0, 0);
+    pte = walk(pagetable, va0, 0);
+    if((*pte & PTE_W) == 0){
+      if((*pte & PTE_V) == 0){
+        printf("page missing?\n");
+        return -1;
+      }
       if(cowrefCount((void *) pa0) == 1){
         *pte |= PTE_W;
       }
@@ -392,6 +396,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
           printf("mappages error in copyout\n");
           return -1;
         }
+        pa0 = (uint64)mem;
       }
       else{
         printf("negative getref value in copyout\n");
