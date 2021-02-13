@@ -67,12 +67,55 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  }
+  else if (r_scause() == 15)
+  {
+    uint64 pa; 
+    pte_t *pte; 
+    // pte = (pte_t *)PA2PTE(pa);
+    if((pte = walk(p->pagetable, PGROUNDDOWN(r_stval()), 0)) == 0){
+      printf("pte should exist");
+      p-> killed = 1;
+      goto done;
+    }
+    pa = walkaddr(p->pagetable, PGROUNDDOWN(r_stval()));
+    uint flags;
+
+    if((*pte & PTE_V) == 0){
+      printf("USERTRAP: page not present\n");
+      p->killed = 1;
+      goto done;
+    }
+    if(cowrefCount((void *)pa) == 1){
+      *pte |= PTE_W;
+      goto done;
+    }
+    else if(cowrefCount((void *)pa) > 1){
+      char* mem;
+      if((mem = kalloc()) == 0){
+        printf("allocation error in usertrap");
+        p-> killed = 1;
+        goto done;
+      }
+      kfree((void *)pa);
+      memmove(mem, (char*)pa, PGSIZE);
+      flags = PTE_FLAGS(*pte);
+      flags |= PTE_W;
+      uvmunmap(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, 0);
+      if(mappages(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, (uint64)mem, flags) != 0){
+        kfree(mem);
+        p->killed = 1;
+        goto done;
+      }
+
+    }
+  }
+   else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
-
+  done:
   if(p->killed)
     exit(-1);
 
