@@ -1,0 +1,432 @@
+diff --git a/.time.txt.swp b/.time.txt.swp
+new file mode 100644
+index 0000000..c3acb8b
+Binary files /dev/null and b/.time.txt.swp differ
+diff --git a/grade-lab-cow b/grade-lab-cow
+index 2a39f82..7527f6b 100755
+--- a/grade-lab-cow
++++ b/grade-lab-cow
+@@ -29,7 +29,7 @@ def test_file():
+ def test_usertests():
+     r.run_qemu(shell_script([
+         'usertests'
+-    ]), timeout=150)
++    ]), timeout=300)
+     r.match('^ALL TESTS PASSED$')
+ 
+ @test(1, "time")
+diff --git a/gradelib.py b/gradelib.py
+index 2ec8d4c..f08146e 100644
+--- a/gradelib.py
++++ b/gradelib.py
+@@ -323,7 +323,7 @@ QEMU appears to already be running.  Please exit it if possible or use
+             self.proc.terminate()
+ 
+ class GDBClient(object):
+-    def __init__(self, port, timeout=15):
++    def __init__(self, port, timeout=150):
+         start = time.time()
+         while True:
+             self.sock = socket.socket()
+@@ -403,7 +403,7 @@ class Runner():
+         should be a list of additional arguments to pass to make.  The
+         timeout argument bounds how long to run before returning."""
+ 
+-        def run_qemu_kw(target_base="qemu", make_args=[], timeout=30):
++        def run_qemu_kw(target_base="qemu", make_args=[], timeout=300):
+             return target_base, make_args, timeout
+         target_base, make_args, timeout = run_qemu_kw(**kw)
+ 
+@@ -416,7 +416,7 @@ class Runner():
+             # Wait for QEMU to start or make to fail.  This will set
+             # self.gdb if QEMU starts.
+             self.qemu.on_output = [self.__monitor_start]
+-            self.__react([self.qemu], timeout=30)
++            self.__react([self.qemu], timeout=300)
+             self.qemu.on_output = []
+             if self.gdb is None:
+                 print("Failed to connect to QEMU; output:")
+@@ -461,7 +461,7 @@ Failed to shutdown QEMU.  You might need to 'killall qemu' or
+             raise TerminateTest
+ 
+     def __react(self, reactors, timeout):
+-        deadline = time.time() + timeout
++        deadline = time.time() + timeout+300
+         try:
+             while True:
+                 timeleft = deadline - time.time()
+diff --git a/kernel/defs.h b/kernel/defs.h
+index c3934d4..68717e7 100644
+--- a/kernel/defs.h
++++ b/kernel/defs.h
+@@ -62,7 +62,9 @@ void            ramdiskrw(struct buf*);
+ void*           kalloc(void);
+ void            kfree(void *);
+ void            kinit();
+-
++uint            cowget(void * );
++uint            cowput(void * );
++uint            cowrefCount (void *);
+ // log.c
+ void            initlog(int, struct superblock*);
+ void            log_write(struct buf*);
+@@ -171,6 +173,7 @@ uint64          walkaddr(pagetable_t, uint64);
+ int             copyout(pagetable_t, uint64, char *, uint64);
+ int             copyin(pagetable_t, char *, uint64, uint64);
+ int             copyinstr(pagetable_t, char *, uint64, uint64);
++pte_t *         walk(pagetable_t , uint64 , int );
+ 
+ // plic.c
+ void            plicinit(void);
+diff --git a/kernel/kalloc.c b/kernel/kalloc.c
+index fa6a0ac..02b3f91 100644
+--- a/kernel/kalloc.c
++++ b/kernel/kalloc.c
+@@ -17,7 +17,15 @@ extern char end[]; // first address after kernel.
+ struct run {
+   struct run *next;
+ };
++struct cow_info{
++  struct list entry;
++  uint refcount;
++  void * pa;
++};
++typedef struct cow_info Cow_info;
+ 
++static struct list cow_list;
++static struct spinlock cow_lock;
+ struct {
+   struct spinlock lock;
+   struct run *freelist;
+@@ -26,8 +34,12 @@ struct {
+ void
+ kinit()
+ {
+-  initlock(&kmem.lock, "kmem");
+-  freerange(end, (void*)PHYSTOP);
++  char *p = (char *) PGROUNDUP((uint64) end);
++  bd_init(p, (void *) PHYSTOP);
++  initlock(&cow_lock, "cow");
++  lst_init(&cow_list);
++  // initlock(&kmem.lock, "kmem");
++  // freerange(end, (void*)PHYSTOP);
+ }
+ 
+ void
+@@ -38,6 +50,74 @@ freerange(void *pa_start, void *pa_end)
+   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+     kfree(p);
+ }
++uint 
++cowrefCount (void *pa){
++   uint count = 0;
++  Cow_info *ci; 
++  acquire(&cow_lock);
++  for(struct list *p = cow_list.next; p != &cow_list; p = p->next){
++    ci = (Cow_info *) p;
++    if(ci->pa == pa){
++      count = ci->refcount;
++      break;
++    }
++
++  }
++  release(&cow_lock);
++  return count;
++}
++uint 
++cowput(void * pa){
++  uint count = 0;
++  Cow_info *ci; 
++  acquire(&cow_lock);
++  for(struct list *p = cow_list.next; p != &cow_list; p = p->next){
++    ci = (Cow_info *) p;
++    if(ci->pa != pa)
++      continue;
++    count = --ci->refcount;
++    if(count >= 0)
++      goto done;
++    else{
++      printf("negative refcount in cowput...\n");
++    }
++    lst_remove(p);
++    bd_free(ci);
++    break;
++  }
++
++  done:
++  release(&cow_lock);
++  return count;
++
++}
++uint
++cowget(void * pa){
++  uint count = 0;
++  Cow_info *ci; 
++  acquire(&cow_lock);
++  for(struct list *p = cow_list.next; p != &cow_list; p = p->next){
++    ci = (Cow_info *) p;
++    if(ci->pa == pa){
++      count = ++ci->refcount;
++      break;
++    }
++
++  }
++  if(count == 0){
++    ci = (Cow_info *) bd_malloc(sizeof(Cow_info));
++    if(ci == 0){
++      release(&cow_lock);
++      panic("Cow_info allocation");
++    }
++    ci->pa = pa;
++    count = ci->refcount = 1;
++    lst_push(&cow_list, ci);
++  }
++  release(&cow_lock);
++  return count;
++}
++
+ 
+ // Free the page of physical memory pointed at by v,
+ // which normally should have been returned by a
+@@ -46,37 +126,32 @@ freerange(void *pa_start, void *pa_end)
+ void
+ kfree(void *pa)
+ {
+-  struct run *r;
+-
+-  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+-    panic("kfree");
+-
+-  // Fill with junk to catch dangling refs.
+-  memset(pa, 1, PGSIZE);
+-
+-  r = (struct run*)pa;
+-
+-  acquire(&kmem.lock);
+-  r->next = kmem.freelist;
+-  kmem.freelist = r;
+-  release(&kmem.lock);
++  uint count = cowput(pa);
++  if(count == 0){
++    bd_free(pa);
++  }
+ }
+ 
++
+ // Allocate one 4096-byte page of physical memory.
+ // Returns a pointer that the kernel can use.
+ // Returns 0 if the memory cannot be allocated.
+ void *
+ kalloc(void)
+ {
+-  struct run *r;
+ 
+-  acquire(&kmem.lock);
+-  r = kmem.freelist;
+-  if(r)
+-    kmem.freelist = r->next;
+-  release(&kmem.lock);
++  void *p = bd_malloc(PGSIZE);
++  cowget(p);
++  return p;
++  // struct run *r;
++
++  // acquire(&kmem.lock);
++  // r = kmem.freelist;
++  // if(r)
++  //   kmem.freelist = r->next;
++  // release(&kmem.lock);
+ 
+-  if(r)
+-    memset((char*)r, 5, PGSIZE); // fill with junk
+-  return (void*)r;
++  // if(r)
++  //   memset((char*)r, 5, PGSIZE); // fill with junk
++  // return (void*)r;
+ }
+diff --git a/kernel/riscv.h b/kernel/riscv.h
+index f46ba59..2d35153 100644
+--- a/kernel/riscv.h
++++ b/kernel/riscv.h
+@@ -332,7 +332,7 @@ sfence_vma()
+ #define PTE_W (1L << 2)
+ #define PTE_X (1L << 3)
+ #define PTE_U (1L << 4) // 1 -> user can access
+-
++#define PTE_COW (1L << 8)
+ // shift a physical address to the right place for a PTE.
+ #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
+ 
+diff --git a/kernel/trap.c b/kernel/trap.c
+index 51a7805..13973dc 100644
+--- a/kernel/trap.c
++++ b/kernel/trap.c
+@@ -67,12 +67,62 @@ usertrap(void)
+     syscall();
+   } else if((which_dev = devintr()) != 0){
+     // ok
+-  } else {
++  }
++  else if (r_scause() == 15)
++  {
++    uint64 pa; 
++    pte_t *pte; 
++    // pte = (pte_t *)PA2PTE(pa);
++    if((pte = walk(p->pagetable, PGROUNDDOWN(r_stval()), 0)) == 0){
++      printf("pte should exist");
++      p-> killed = 1;
++      goto done;
++    }
++    pa = walkaddr(p->pagetable, PGROUNDDOWN(r_stval()));
++    uint flags;
++
++    if((*pte & PTE_V) == 0){
++      printf("USERTRAP: page not present\n");
++      p->killed = 1;
++      goto done;
++    }
++    if(cowrefCount((void *)pa) == 1){
++      *pte |= PTE_W;
++      goto done;
++    }
++    else if(cowrefCount((void *)pa) > 1){
++
++      if (!(*pte & PTE_COW))
++      {
++        goto done;
++      }
++
++      char* mem;
++      if((mem = kalloc()) == 0){
++        printf("allocation error in usertrap");
++        p-> killed = 1;
++        goto done;
++      }
++      kfree((void *)pa);
++      memmove(mem, (char*)pa, PGSIZE);
++      flags = PTE_FLAGS(*pte);
++      flags = (flags & ~PTE_COW);
++      flags |= PTE_W;
++      uvmunmap(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, 0);
++      if(mappages(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, (uint64)mem, flags) != 0){
++        kfree(mem);
++        p->killed = 1;
++        goto done;
++      }
++
++    }
++  }
++   else {
+     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+     p->killed = 1;
+   }
+-
++  done:
+   if(p->killed)
+     exit(-1);
+ 
+diff --git a/kernel/vm.c b/kernel/vm.c
+index dd65184..5498b3b 100644
+--- a/kernel/vm.c
++++ b/kernel/vm.c
+@@ -75,7 +75,7 @@ kvminithart()
+ //   21..39 -- 9 bits of level-1 index.
+ //   12..20 -- 9 bits of level-0 index.
+ //    0..12 -- 12 bits of byte offset within the page.
+-static pte_t *
++pte_t *
+ walk(pagetable_t pagetable, uint64 va, int alloc)
+ {
+   if(va >= MAXVA)
+@@ -322,22 +322,24 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+   pte_t *pte;
+   uint64 pa, i;
+   uint flags;
+-  char *mem;
+ 
+   for(i = 0; i < sz; i += PGSIZE){
+     if((pte = walk(old, i, 0)) == 0)
+       panic("uvmcopy: pte should exist");
+     if((*pte & PTE_V) == 0)
+       panic("uvmcopy: page not present");
++
++    *pte &= ~PTE_W;
++    *pte |= PTE_COW;
+     pa = PTE2PA(*pte);
+     flags = PTE_FLAGS(*pte);
+-    if((mem = kalloc()) == 0)
+-      goto err;
+-    memmove(mem, (char*)pa, PGSIZE);
+-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+-      kfree(mem);
++    // if((mem = kalloc()) == 0)
++    //   goto err;
++    // memmove(mem, (char*)pa, PGSIZE);
++    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+       goto err;
+     }
++    cowget((void *)pa);
+   }
+   return 0;
+ 
+@@ -366,12 +368,51 @@ int
+ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
+ {
+   uint64 n, va0, pa0;
+-
++  pte_t *pte;
+   while(len > 0){
+     va0 = PGROUNDDOWN(dstva);
+     pa0 = walkaddr(pagetable, va0);
+     if(pa0 == 0)
+       return -1;
++    pte = walk(pagetable, va0, 0);
++    if((*pte & PTE_W) == 0){
++      if((*pte & PTE_V) == 0){
++        printf("page missing?\n");
++        return -1;
++      }
++      if(cowrefCount((void *) pa0) == 1){
++        *pte |= PTE_W;
++      }
++      else if(cowrefCount((void *) pa0) > 1){
++
++      if (!(*pte & PTE_COW))
++      {
++        return -1;
++      }
++
++        char* mem;
++        if((mem = kalloc()) == 0){
++          printf("allocation error in copyout\n");
++          return -1;
++        }
++        kfree((void *) pa0);
++        memmove(mem, (char *)pa0, PGSIZE);
++        uint flags = PTE_FLAGS(*pte);
++        flags = (flags & ~PTE_COW);
++        flags |= PTE_W;
++        uvmunmap(pagetable, va0, PGSIZE, 0);
++        if(mappages(pagetable, va0, PGSIZE, (uint64)mem, flags) != 0){
++          printf("mappages error in copyout\n");
++          return -1;
++        }
++        pa0 = (uint64)mem;
++      }
++      else{
++        printf("negative getref value in copyout\n");
++        return -1;
++      }
++    }
++    
+     n = PGSIZE - (dstva - va0);
+     if(n > len)
+       n = len;
+diff --git a/time.txt b/time.txt
+new file mode 100644
+index 0000000..48082f7
+--- /dev/null
++++ b/time.txt
+@@ -0,0 +1 @@
++12
