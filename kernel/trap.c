@@ -91,6 +91,12 @@ usertrap(void)
       goto done;
     }
     else if(cowrefCount((void *)pa) > 1){
+
+      if (!(*pte & PTE_COW))
+      {
+        goto done;
+      }
+
       char* mem;
       if((mem = kalloc()) == 0){
         printf("allocation error in usertrap");
@@ -100,6 +106,7 @@ usertrap(void)
       kfree((void *)pa);
       memmove(mem, (char*)pa, PGSIZE);
       flags = PTE_FLAGS(*pte);
+      flags = (flags & ~PTE_COW);
       flags |= PTE_W;
       uvmunmap(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, 0);
       if(mappages(p->pagetable, PGROUNDDOWN(r_stval()), PGSIZE, (uint64)mem, flags) != 0){

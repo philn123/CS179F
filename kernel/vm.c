@@ -328,8 +328,10 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
+
     *pte &= ~PTE_W;
+    *pte |= PTE_COW;
+    pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     // if((mem = kalloc()) == 0)
     //   goto err;
@@ -382,6 +384,12 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
         *pte |= PTE_W;
       }
       else if(cowrefCount((void *) pa0) > 1){
+
+      if (!(*pte & PTE_COW))
+      {
+        return -1;
+      }
+
         char* mem;
         if((mem = kalloc()) == 0){
           printf("allocation error in copyout\n");
@@ -390,6 +398,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
         kfree((void *) pa0);
         memmove(mem, (char *)pa0, PGSIZE);
         uint flags = PTE_FLAGS(*pte);
+        flags = (flags & ~PTE_COW);
         flags |= PTE_W;
         uvmunmap(pagetable, va0, PGSIZE, 0);
         if(mappages(pagetable, va0, PGSIZE, (uint64)mem, flags) != 0){
