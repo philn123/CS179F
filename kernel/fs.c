@@ -402,6 +402,38 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+  bn -= NINDIRECT;
+
+  //now we check for double indirect block
+  if(bn < N_DOUBLE_INDIRECT)
+  {
+    if((addr = ip->addrs[NDIRECT+1]) == 0)  //plus one to get the double indirect block, which is under the the normal indirect
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+
+    /* https://stackoverflow.com/questions/41433202/converting-the-index-of-1d-array-into-2d-array */
+    /* For converting this 1d index to 2d due to double indirect blocks */
+    uint bn1 = bn / 256;
+    uint bn2 = bn % 256;
+
+    if((addr = a[bn1]) == 0){
+      a[bn1] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+
+    if((addr = a[bn2]) == 0){
+      a[bn2] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    return addr;
+  }
+
   panic("bmap: out of range");
 }
 
@@ -413,7 +445,7 @@ bmap(struct inode *ip, uint bn)
 static void
 itrunc(struct inode *ip)
 {
-  int i, j;
+  int i, j, index;
   struct buf *bp;
   uint *a;
 
@@ -434,6 +466,26 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  if(ip->addrs[NDIRECT+1]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    
+    for (j = 0; j < NINDIRECT; ++j)
+    {
+      for(int z = 0; z < NINDIRECT; ++z)
+      {
+        index = (j * 256) + z;
+        if(a[index])
+        {
+          bfree(ip->dev, a[index]);
+        }
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    ip->addrs[NDIRECT+1] = 0;
   }
 
   ip->size = 0;
