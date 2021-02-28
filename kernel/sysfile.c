@@ -286,32 +286,28 @@ create(char *path, short type, short major, short minor)
 uint64
 sys_symlink(void)
 {
-  //your implementation goes here
+  int n, r;
+  struct inode *ip;
   char target[MAXPATH];
   char path[MAXPATH];
-  struct inode *ip;
-
-  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+  if((n = argstr(0, target, MAXPATH)) < 0 || ((n = argstr(1, path, MAXPATH)) < 0)){
     return -1;
-
+  }
+  
   begin_op(ROOTDEV);
-
-  // create returns inode if it already exists and creates it if it doesnt
-  // create the pointer to the target
-  if((ip = create(path, T_SYMLINK, 0, 0)) == 0)
-  {
+  ip = create(path, T_SYMLINK, 0 ,0);
+  if(ip == 0){
     end_op(ROOTDEV);
     return -1;
   }
 
-  // once we have created it, we should write the path name to it
-  if(writei(ip, 0, (uint64)&target, 0, MAXPATH) != MAXPATH)
-  {
+  if ((r = writei(ip, 0, (uint64)&target,0,MAXPATH)) != MAXPATH){
     iunlockput(ip);
     end_op(ROOTDEV);
     return -1;
   }
 
+  iupdate(ip);
   iunlockput(ip);
   end_op(ROOTDEV);
   return 0;
@@ -330,7 +326,13 @@ sys_open(void)
     return -1;
 
   begin_op(ROOTDEV);
-
+  int counter = 0;
+  start:
+  if(counter >= 10){
+    end_op(ROOTDEV);
+    printf("too many loops\n");
+    return -1;
+  }
   if(omode & O_CREATE){
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
@@ -376,13 +378,22 @@ sys_open(void)
       return -1;
     }
   }
-
+  
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
     end_op(ROOTDEV);
     return -1;
   }
-
+  if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
+    readi(ip, 0, (uint64)&path, 0, MAXPATH);
+    iunlockput(ip);
+    // if((ip = namei(path)) == 0 ){
+    //   end_op(ROOTDEV);
+    //   return -1;
+    // }
+    counter++;
+    goto start;
+  }
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
     if(f)
       fileclose(f);
@@ -399,6 +410,8 @@ sys_open(void)
   else {
     f->type = FD_INODE;
   }
+  
+  
   f->ip = ip;
   f->off = 0;
   f->readable = !(omode & O_WRONLY);
