@@ -287,6 +287,33 @@ uint64
 sys_symlink(void)
 {
   //your implementation goes here
+  char target[MAXPATH];
+  char path[MAXPATH];
+  struct inode *ip;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  begin_op(ROOTDEV);
+
+  // create returns inode if it already exists and creates it if it doesnt
+  // create the pointer to the target
+  if((ip = create(path, T_SYMLINK, 0, 0)) == 0)
+  {
+    end_op(ROOTDEV);
+    return -1;
+  }
+
+  // once we have created it, we should write the path name to it
+  if(writei(ip, 0, (uint64)&target, 0, MAXPATH) != MAXPATH)
+  {
+    iunlockput(ip);
+    end_op(ROOTDEV);
+    return -1;
+  }
+
+  iunlockput(ip);
+  end_op(ROOTDEV);
   return 0;
 }
 
@@ -315,6 +342,33 @@ sys_open(void)
       end_op(ROOTDEV);
       return -1;
     }
+    if(!(omode & O_NOFOLLOW))
+    {
+      int count = 0;
+      while(ip->type == T_SYMLINK && count++ < 10)
+      {
+        ilock(ip);
+        if(readi(ip, 0, (uint64) &path,0, MAXPATH) != MAXPATH)
+        {
+          iunlockput(ip);
+          end_op(ROOTDEV);
+          return -1;
+        }
+        iunlockput(ip);
+
+        if((ip = namei(path)) == 0)
+        {
+          end_op(ROOTDEV);
+          return -1;
+        }
+      }
+
+      if(count >= 10)
+      {
+        end_op(ROOTDEV);
+        return -1;
+      }
+    }
     ilock(ip);
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
@@ -341,7 +395,8 @@ sys_open(void)
     f->type = FD_DEVICE;
     f->major = ip->major;
     f->minor = ip->minor;
-  } else {
+  } 
+  else {
     f->type = FD_INODE;
   }
   f->ip = ip;
