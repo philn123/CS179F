@@ -343,33 +343,6 @@ sys_open(void)
       end_op(ROOTDEV);
       return -1;
     }
-    if(!(omode & O_NOFOLLOW))
-    {
-      int count = 0;
-      while(ip->type == T_SYMLINK && count++ < 10)
-      {
-        ilock(ip);
-        if(readi(ip, 0, (uint64) &path,0, MAXPATH) != MAXPATH)
-        {
-          iunlockput(ip);
-          end_op(ROOTDEV);
-          return -1;
-        }
-        iunlockput(ip);
-
-        if((ip = namei(path)) == 0)
-        {
-          end_op(ROOTDEV);
-          return -1;
-        }
-      }
-
-      if(count >= 10)
-      {
-        end_op(ROOTDEV);
-        return -1;
-      }
-    }
     ilock(ip);
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
