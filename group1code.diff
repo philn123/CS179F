@@ -1,0 +1,213 @@
+diff --git a/kernel/file.h b/kernel/file.h
+index 92f6198..2332275 100644
+--- a/kernel/file.h
++++ b/kernel/file.h
+@@ -27,7 +27,7 @@ struct inode {
+   short minor;
+   short nlink;
+   uint size;
+-  uint addrs[NDIRECT+1];
++  uint addrs[NDIRECT+2];
+ };
+ 
+ // map major device number to device functions.
+diff --git a/kernel/fs.c b/kernel/fs.c
+index 53586d5..d4b414c 100644
+--- a/kernel/fs.c
++++ b/kernel/fs.c
+@@ -402,6 +402,38 @@ bmap(struct inode *ip, uint bn)
+     return addr;
+   }
+ 
++  bn -= NINDIRECT;
++
++  //now we check for double indirect block
++  if(bn < N_DOUBLE_INDIRECT)
++  {
++    if((addr = ip->addrs[NDIRECT+1]) == 0)  //plus one to get the double indirect block, which is under the the normal indirect
++      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
++    bp = bread(ip->dev, addr);
++    a = (uint*)bp->data;
++
++    /* https://stackoverflow.com/questions/41433202/converting-the-index-of-1d-array-into-2d-array */
++    /* For converting this 1d index to 2d due to double indirect blocks */
++    uint bn1 = bn / 256;
++    uint bn2 = bn % 256;
++
++    if((addr = a[bn1]) == 0){
++      a[bn1] = addr = balloc(ip->dev);
++      log_write(bp);
++    }
++    brelse(bp);
++
++    bp = bread(ip->dev, addr);
++    a = (uint*)bp->data;
++
++    if((addr = a[bn2]) == 0){
++      a[bn2] = addr = balloc(ip->dev);
++      log_write(bp);
++    }
++    brelse(bp);
++    return addr;
++  }
++
+   panic("bmap: out of range");
+ }
+ 
+@@ -415,7 +447,9 @@ itrunc(struct inode *ip)
+ {
+   int i, j;
+   struct buf *bp;
++  struct buf *bp2;
+   uint *a;
++  uint *b;
+ 
+   for(i = 0; i < NDIRECT; i++){
+     if(ip->addrs[i]){
+@@ -436,6 +470,35 @@ itrunc(struct inode *ip)
+     ip->addrs[NDIRECT] = 0;
+   }
+ 
++  if(ip->addrs[NDIRECT+1]){
++    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
++    a = (uint*)bp->data;
++    
++    for (j = 0; j < NINDIRECT; ++j)
++    {
++      if(a[j]){
++        
++        bp2 = bread(ip->dev,a[j]);
++        b = (uint*)bp2->data;
++        for(int z = 0; z < NINDIRECT; ++z)
++        {
++          if(b[z])
++          {
++            bfree(ip->dev, b[z]);
++            b[z] = 0;
++          }
++        }
++        brelse(bp2);
++        bfree(ip->dev, a[j]);
++        a[j] = 0;
++      }
++      
++    }
++    brelse(bp);
++    bfree(ip->dev, ip->addrs[NDIRECT+1]);
++    ip->addrs[NDIRECT+1] = 0;
++  }
++
+   ip->size = 0;
+   iupdate(ip);
+ }
+diff --git a/kernel/fs.h b/kernel/fs.h
+index 139dcc9..8a2ec5c 100644
+--- a/kernel/fs.h
++++ b/kernel/fs.h
+@@ -24,9 +24,10 @@ struct superblock {
+ 
+ #define FSMAGIC 0x10203040
+ 
+-#define NDIRECT 12
++#define NDIRECT 11
+ #define NINDIRECT (BSIZE / sizeof(uint))
+-#define MAXFILE (NDIRECT + NINDIRECT)
++#define N_DOUBLE_INDIRECT (NINDIRECT * NINDIRECT)
++#define MAXFILE (NDIRECT + NINDIRECT + N_DOUBLE_INDIRECT)  //11 + 256 + 256*256 -> total of 65803 blocks
+ 
+ // On-disk inode structure
+ struct dinode {
+@@ -35,7 +36,7 @@ struct dinode {
+   short minor;          // Minor device number (T_DEVICE only)
+   short nlink;          // Number of links to inode in file system
+   uint size;            // Size of file (bytes)
+-  uint addrs[NDIRECT+1];   // Data block addresses
++  uint addrs[NDIRECT+2];   // Data block addresses
+ };
+ 
+ // Inodes per block.
+diff --git a/kernel/sysfile.c b/kernel/sysfile.c
+index 9d95ac9..606b8c0 100644
+--- a/kernel/sysfile.c
++++ b/kernel/sysfile.c
+@@ -286,7 +286,30 @@ create(char *path, short type, short major, short minor)
+ uint64
+ sys_symlink(void)
+ {
+-  //your implementation goes here
++  int n, r;
++  struct inode *ip;
++  char target[MAXPATH];
++  char path[MAXPATH];
++  if((n = argstr(0, target, MAXPATH)) < 0 || ((n = argstr(1, path, MAXPATH)) < 0)){
++    return -1;
++  }
++  
++  begin_op(ROOTDEV);
++  ip = create(path, T_SYMLINK, 0 ,0);
++  if(ip == 0){
++    end_op(ROOTDEV);
++    return -1;
++  }
++
++  if ((r = writei(ip, 0, (uint64)&target,0,MAXPATH)) != MAXPATH){
++    iunlockput(ip);
++    end_op(ROOTDEV);
++    return -1;
++  }
++  
++  iupdate(ip);
++  iunlockput(ip);
++  end_op(ROOTDEV);
+   return 0;
+ }
+ 
+@@ -303,7 +326,12 @@ sys_open(void)
+     return -1;
+ 
+   begin_op(ROOTDEV);
+-
++  int counter = 0;
++  start:
++  if(counter >= 10){
++    end_op(ROOTDEV);
++    return -1;
++  }
+   if(omode & O_CREATE){
+     ip = create(path, T_FILE, 0, 0);
+     if(ip == 0){
+@@ -322,13 +350,18 @@ sys_open(void)
+       return -1;
+     }
+   }
+-
++  
+   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
+     iunlockput(ip);
+     end_op(ROOTDEV);
+     return -1;
+   }
+-
++  if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
++    readi(ip, 0, (uint64)&path, 0, MAXPATH);
++    iunlockput(ip);
++    counter++;
++    goto start;
++  }
+   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
+     if(f)
+       fileclose(f);
+@@ -341,9 +374,12 @@ sys_open(void)
+     f->type = FD_DEVICE;
+     f->major = ip->major;
+     f->minor = ip->minor;
+-  } else {
++  } 
++  else {
+     f->type = FD_INODE;
+   }
++  
++  
+   f->ip = ip;
+   f->off = 0;
+   f->readable = !(omode & O_WRONLY);
