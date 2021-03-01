@@ -296,22 +296,16 @@ sys_symlink(void)
   }
     
   begin_op(ROOTDEV);
-
-
-    ip = create(path, T_SYMLINK, 0 ,0);
-    if(ip == 0){
-      end_op(ROOTDEV);
-      return -1;
-    }
-
-    
-    
-
-    if ((r = writei(ip, 0, (uint64)&target,0,MAXPATH)) != MAXPATH){ //FIX THIS ;~;
-      iunlockput(ip);
-      end_op(ROOTDEV);
-      return -1;
-    }
+  ip = create(path, T_SYMLINK, 0 ,0);
+  if(ip == 0){
+    end_op(ROOTDEV);
+    return -1;
+  }
+  if ((r = writei(ip, 0, (uint64)&target,0,MAXPATH)) != MAXPATH){ 
+    iunlockput(ip);
+    end_op(ROOTDEV);
+    return -1;
+  }
   iupdate(ip);
   iunlockput(ip);
 
@@ -336,7 +330,6 @@ sys_open(void)
   start:
   if(counter >= 10){
     end_op(ROOTDEV);
-    printf("too many loops\n");
     return -1;
   }
   if(omode & O_CREATE){
@@ -366,10 +359,6 @@ sys_open(void)
   if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
     readi(ip, 0, (uint64)&path, 0, MAXPATH);
     iunlockput(ip);
-    // if((ip = namei(path)) == 0 ){
-    //   end_op(ROOTDEV);
-    //   return -1;
-    // }
     counter++;
     goto start;
   }
