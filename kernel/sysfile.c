@@ -300,13 +300,20 @@ sys_symlink(void)
     end_op(ROOTDEV);
     return -1;
   }
+<<<<<<< HEAD
 
   if ((r = writei(ip, 0, (uint64)&target,0,MAXPATH)) != MAXPATH){
+=======
+  if ((r = writei(ip, 0, (uint64)&target,0,MAXPATH)) != MAXPATH){ 
+>>>>>>> e05f30c... changed itrunc for double
     iunlockput(ip);
     end_op(ROOTDEV);
     return -1;
   }
+<<<<<<< HEAD
 
+=======
+>>>>>>> e05f30c... changed itrunc for double
   iupdate(ip);
   iunlockput(ip);
   end_op(ROOTDEV);
@@ -330,7 +337,6 @@ sys_open(void)
   start:
   if(counter >= 10){
     end_op(ROOTDEV);
-    printf("too many loops\n");
     return -1;
   }
   if(omode & O_CREATE){
@@ -387,10 +393,6 @@ sys_open(void)
   if(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)){
     readi(ip, 0, (uint64)&path, 0, MAXPATH);
     iunlockput(ip);
-    // if((ip = namei(path)) == 0 ){
-    //   end_op(ROOTDEV);
-    //   return -1;
-    // }
     counter++;
     goto start;
   }
