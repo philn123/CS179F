@@ -445,9 +445,10 @@ bmap(struct inode *ip, uint bn)
 static void
 itrunc(struct inode *ip)
 {
-  int i, j, index;
+  int i, j;
   struct buf *bp;
   uint *a;
+  uint *b;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -474,16 +475,25 @@ itrunc(struct inode *ip)
     
     for (j = 0; j < NINDIRECT; ++j)
     {
-      for(int z = 0; z < NINDIRECT; ++z)
-      {
-        index = (j * 256) + z;
-        if(a[index])
+      if(a[j]){
+        brelse(bp);
+        bp = bread(ip->dev,a[j]);
+        b = (uint*)bp->data;
+        for(int z = 0; z < NINDIRECT; ++z)
         {
-          bfree(ip->dev, a[index]);
+          if(b[z])
+          {
+            bfree(ip->dev, b[z]);
+            b[z] = 0;
+          }
         }
+        brelse(bp);
+        bfree(ip->dev, a[j]);
+        a[j] = 0;
       }
+      
     }
-    brelse(bp);
+    
     bfree(ip->dev, ip->addrs[NDIRECT+1]);
     ip->addrs[NDIRECT+1] = 0;
   }
