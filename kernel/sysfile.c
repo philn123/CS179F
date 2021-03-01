@@ -300,20 +300,13 @@ sys_symlink(void)
     end_op(ROOTDEV);
     return -1;
   }
-<<<<<<< HEAD
 
   if ((r = writei(ip, 0, (uint64)&target,0,MAXPATH)) != MAXPATH){
-=======
-  if ((r = writei(ip, 0, (uint64)&target,0,MAXPATH)) != MAXPATH){ 
->>>>>>> e05f30c... changed itrunc for double
     iunlockput(ip);
     end_op(ROOTDEV);
     return -1;
   }
-<<<<<<< HEAD
-
-=======
->>>>>>> e05f30c... changed itrunc for double
+  
   iupdate(ip);
   iunlockput(ip);
   end_op(ROOTDEV);
