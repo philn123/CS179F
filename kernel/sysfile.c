@@ -286,8 +286,8 @@ create(char *path, short type, short major, short minor)
 uint64
 sys_symlink(void)
 {
+
   int n, r;
- // struct file *f;
   struct inode *ip;
   char target[MAXPATH];
   char path[MAXPATH];
@@ -306,9 +306,9 @@ sys_symlink(void)
     end_op(ROOTDEV);
     return -1;
   }
+
   iupdate(ip);
   iunlockput(ip);
-
   end_op(ROOTDEV);
   return 0;
 }
@@ -343,6 +343,33 @@ sys_open(void)
       end_op(ROOTDEV);
       return -1;
     }
+    if(!(omode & O_NOFOLLOW))
+    {
+      int count = 0;
+      while(ip->type == T_SYMLINK && count++ < 10)
+      {
+        ilock(ip);
+        if(readi(ip, 0, (uint64) &path,0, MAXPATH) != MAXPATH)
+        {
+          iunlockput(ip);
+          end_op(ROOTDEV);
+          return -1;
+        }
+        iunlockput(ip);
+
+        if((ip = namei(path)) == 0)
+        {
+          end_op(ROOTDEV);
+          return -1;
+        }
+      }
+
+      if(count >= 10)
+      {
+        end_op(ROOTDEV);
+        return -1;
+      }
+    }
     ilock(ip);
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
@@ -374,7 +401,8 @@ sys_open(void)
     f->type = FD_DEVICE;
     f->major = ip->major;
     f->minor = ip->minor;
-  } else {
+  } 
+  else {
     f->type = FD_INODE;
   }
   
