@@ -104,3 +104,11 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 };
+
+struct map_vma {
+  uint64 start;
+  int length;
+  int permission;
+  int flags;
+  struct file *file;
+};

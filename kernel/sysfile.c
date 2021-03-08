@@ -483,3 +483,15 @@ sys_pipe(void)
   return 0;
 }
 
+uint64 sys_mmap()
+{ // your implementation 
+  return -1;
+
+}
+
+uint64 sys_munmap()
+{ // your implementation 
+  return -1;
+}
+
+
