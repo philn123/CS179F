@@ -82,12 +82,16 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+#define MMAP_START (1L << 37)
 struct vma {
   uint64 start;
+  uint64 end;
   int length;
-  int permission;
+  int prot;
   int flags;
+  int offset;
   struct file *file;
+  int visited;
 };
 
 // Per-process state
