@@ -483,29 +483,6 @@ sys_pipe(void)
   return 0;
 }
 
-struct vma* allocate_map()
-{
-  struct proc *p = myproc();
-  for (int i = 0; i < 16; i++)
-  {
-    if(p->vma_table[i]->visited == 0)  //slot is open
-    {
-      if(i == 0)
-      {
-        printf("YEP\n");
-        p->vma_table[i]->start = MMAP_START;
-      }
-      else
-      {
-        p->vma_table[i]->start = PGROUNDUP(p->vma_table[i-1]->end + 1);
-      } 
-      return p->vma_table[i];
-    }
-  }
-
-  return 0;
-}
-
 uint64 sys_mmap()
 { // your implementation 
 
@@ -517,7 +494,7 @@ uint64 sys_mmap()
   // error checks, grab arguments and put into variables
   if (argaddr(0, &start) < 0 || argint(1, &length) < 0 || 
       argint(2, &prot) < 0 || argint(3, &flags) < 0 || 
-      argint(4, &fd) < 0 || argint(5, &offset) < 0)
+      argfd(4, &fd, &f) < 0 || argint(5, &offset) < 0)
   {
     return -1;
   }
@@ -527,15 +504,6 @@ uint64 sys_mmap()
     return -1;
   }
 
-  // if (!((flags & MAP_SHARED) && (flags & MAP_PRIVATE)))
-  // {
-  //   return -1;
-  // }
-
-  // if (!(prot & PROT_READ) && !(prot & PROT_WRITE))
-  // {
-  //   return -1;
-  // }
   if(p->ofile[fd] == 0)
   {
     return -1;
@@ -544,27 +512,48 @@ uint64 sys_mmap()
   f = p->ofile[fd];
 
   // allocate vma
-  struct vma *map;
-  if ((map = allocate_map()) == 0)
+  struct vma *map = 0;
+  int temp = -1;
+  for(int i = 0; i < 16; i++)
   {
-    return -1; // means no more space in array to allocate
+    if(!p->vma_table[i].visited)
+    {
+      map = &p->vma_table[i];
+      temp = i;
+      break;
+    }
   }
 
-  map->end = PGROUNDUP(map->start + length);
-  map->length = length;
-  map->prot = prot;
-  map->flags = flags;
-  map->file = f;
-  map->offset = offset;
-  map->visited = 1;
+  if (map)
+  {
+    if (temp == 0)
+    {
+      map->end = PGROUNDDOWN(MMAP_START);
+    }
+    else 
+    {
+      map->end = PGROUNDDOWN(p->vma_table[temp-1].start - 1); 
+    }
+    map->start = PGROUNDDOWN(map->end - length);
+    map->length = length;
+    map->prot = prot;
+    map->flags = flags;
+    map->file = f;
+    map->offset = offset;
+    map->visited = 1;
 
-  filedup(map->file);
-
-  return map->start;
+    filedup(map->file);
+    return map->start;
+  }
+  else
+  {
+    return -1;
+  }
 }
 
 uint64 sys_munmap()
 { // your implementation 
+  printf("WTF\n");
   return -1;
 }
 

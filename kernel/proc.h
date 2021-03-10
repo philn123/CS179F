@@ -82,7 +82,7 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
-#define MMAP_START (1L << 37)
+#define MMAP_START (MAXVA - 2 * PGSIZE)
 struct vma {
   uint64 start;
   uint64 end;
@@ -116,5 +116,5 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 
-  struct vma* vma_table[16];
+  struct vma vma_table[16];
 };
