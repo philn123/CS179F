@@ -504,13 +504,6 @@ uint64 sys_mmap()
     return -1;
   }
 
-  if(p->ofile[fd] == 0)
-  {
-    return -1;
-  }
-
-  f = p->ofile[fd];
-
   // find free vma slot to use
   struct vma *map = 0;
   int temp = -1;

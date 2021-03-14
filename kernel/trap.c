@@ -114,8 +114,6 @@ usertrap(void)
 
       memset(mem, 0, PGSIZE);
 
-      printf("walk va %p result : %d \n",fault_addr, walkaddr(p->pagetable, fault_addr));
-
       struct file *f = map->file;
       int offset = fault_addr - map->start;
 
@@ -123,14 +121,12 @@ usertrap(void)
       readi(f->ip, 0, (uint64)mem, offset, PGSIZE);
       iunlock(f->ip);
 
-      if(mappages(p->pagetable, fault_addr+map->offset, PGSIZE, (uint64)mem, map->prot | PTE_U | PTE_X)!= 0)
+      if(mappages(p->pagetable, fault_addr, PGSIZE, (uint64)mem, map->prot | PTE_U)!= 0)
       {
         kfree(mem);
         p->killed = 1;
         goto exit;
       }
-      
-      //map->offset+=PGSIZE;
     }
     else{
       printf("usertrap(): unexpected scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
