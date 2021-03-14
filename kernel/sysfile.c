@@ -511,7 +511,7 @@ uint64 sys_mmap()
 
   f = p->ofile[fd];
 
-  // allocate vma
+  // find free vma slot to use
   struct vma *map = 0;
   int temp = -1;
   for(int i = 0; i < 16; i++)
@@ -541,8 +541,9 @@ uint64 sys_mmap()
     map->file = f;
     map->offset = offset;
     map->visited = 1;
+    map->fd = fd;
 
-    filedup(map->file);
+    map->file = filedup(map->file);
     return map->start;
   }
   else

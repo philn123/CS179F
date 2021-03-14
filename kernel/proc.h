@@ -91,6 +91,7 @@ struct vma {
   int flags;
   int offset;
   struct file *file;
+  int fd;
   int visited;
 };
 

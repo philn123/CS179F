@@ -265,6 +265,36 @@ fork(void)
 
   np->parent = p;
 
+  for (int i = 0; i < 16; i++)
+  {
+    if(p->vma_table[i].visited == 1)
+    {
+      struct vma *parent = &p->vma_table[i];
+      struct vma *child = 0;
+      parent->file = filedup(parent->file);
+      for(int j = 0; j < 16; j++)
+      {
+        if(np->vma_table[j].visited == 0)
+        {
+          child = &np->vma_table[j];
+          break;
+        }
+      }
+
+      if(child)
+      {
+        child->visited = 1;
+        child->start = parent->start;
+        child->end = parent->end;
+        child->length = parent->length;
+        child->prot = parent->prot;
+        child->flags = parent->flags;
+        child->offset = parent->offset;
+        child->file = parent->file;
+      }
+    }
+  }
+
   // copy saved user registers.
   *(np->tf) = *(p->tf);
 
