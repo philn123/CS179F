@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "sleeplock.h"
 #include "fs.h"
+#include "fcntl.h"
 #include "file.h"
 #include "proc.h"
 #include "defs.h"
@@ -122,7 +123,10 @@ found:
   memset(&p->context, 0, sizeof p->context);
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  for(int i = 0; i < 16; i++){ // Sets up the vma table
+    p->vma_table[i].taken = 0; 
+  }
+  p->cur_maxva = VMASTART;
   return p;
 }
 
@@ -264,7 +268,19 @@ fork(void)
   np->sz = p->sz;
 
   np->parent = p;
-
+  np->cur_maxva = p->cur_maxva;
+  for(int i = 0; i < 16; i++){
+    if(p->vma_table[i].taken){
+      p->vma_table[i].file->ref++;
+    }
+    np->vma_table[i].taken = p->vma_table[i].taken;
+    np->vma_table[i].end = p->vma_table[i].end;
+    np->vma_table[i].start = p->vma_table[i].start;
+    np->vma_table[i].fd = p->vma_table[i].fd;
+    np->vma_table[i].file = p->vma_table[i].file;
+    np->vma_table[i].flag = p->vma_table[i].flag;
+    np->vma_table[i].permission = p->vma_table[i].permission;
+  }
   // copy saved user registers.
   *(np->tf) = *(p->tf);
 
@@ -333,7 +349,18 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
-
+  struct vma *vma = 0;
+  for(int i = 0; i < 16; i++){
+    if(p->vma_table[i].taken){
+      vma = &p->vma_table[i];
+      if(vma->flag == MAP_SHARED){
+        filewrite(vma->file, (uint64)vma->start, (uint64)vma->start - (uint64)vma->end);
+      }
+      uvmunmap(p->pagetable, (uint64)vma->start, (uint64)vma->start - (uint64)vma->end, 1);
+      vma->file->ref--;
+    }
+  }
+  p->cur_maxva = VMASTART;
   begin_op(ROOTDEV);
   iput(p->cwd);
   end_op(ROOTDEV);

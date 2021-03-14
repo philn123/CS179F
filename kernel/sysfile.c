@@ -383,6 +383,97 @@ sys_mknod(void)
   end_op(ROOTDEV);
   return 0;
 }
+uint64
+sys_mmap(void){
+  struct proc *p; 
+  p = myproc();
+  uint64 ignore;
+  int length;
+  int prot, flags, fd;
+  int offset;
+  struct file* file;
+  if((argaddr(0,&ignore) < 0) ||
+  ((argint(1, &length)) < 0) ||
+  ((argint(2, &prot)) < 0) ||
+  ((argint(3, &flags)) < 0) ||
+  ((argfd(4, &fd, &file)) < 0 )||
+  ((argint(5, &offset)) < 0)){
+    return -1;
+  }
+  // variable fetching
+  if((!file->writable) && (prot & PROT_WRITE) && (flags & MAP_SHARED)){ // checks if we're trying to share a file that can't be written to.
+    return -1;
+  }
+
+  struct vma *new = 0;
+  int i;
+  for(i = 0; i<16; i++){
+    if((p->vma_table[i].taken == 0)){
+      new = &p->vma_table[i];
+      break;
+    }
+  }
+  if(new){
+    new->taken = 1;
+    new->fd = fd;
+    new->file = file;
+    new->flag = flags;
+    new->permission = prot;
+    new->end = PGROUNDDOWN(p->cur_maxva);
+    new->start = PGROUNDDOWN(p->cur_maxva - length);
+
+    new->file->ref++; // add refcount to the open file
+    p->cur_maxva = new->start;
+  }
+  else{
+    printf("no more room in vma_table");
+    return -1;
+  }
+  return new->start;
+}
+int
+sys_munmap(void){
+  uint64 addr;
+  int length;
+  struct vma *vma = 0;
+  if((argaddr(0,&addr) < 0) || (argint(1, &length)) < 0){
+    return -1;
+  }
+  struct proc *p = myproc();
+  for(int i = 15; i >= 0; i--){
+    if(addr >= p->vma_table[i].start && (addr <= p->vma_table[i].end)){
+      vma = &p->vma_table[i];
+      break;
+    }
+  }
+  if(vma == 0){
+    return -1;
+  }
+  if(vma->flag == MAP_SHARED){
+    filewrite(vma->file, vma->start, length);
+  }
+  uvmunmap(p->pagetable, vma->start, length, 1);
+  // if we're unmapping the whole file
+  if(vma->start + length == vma->end){
+    vma->file->ref --;
+    vma->taken = 0;
+  }
+  //update currmaxva
+  uint64 max = 0;
+  for(int i = 0; i < 16; i++){
+    if(p->vma_table[i].taken && p->vma_table[i].start > max){
+      max = p->vma_table[i].start;
+    }
+  }
+  if(max == 0){ // vma table is empty
+    p->cur_maxva = VMASTART;
+  }else{
+    p->cur_maxva = max; 
+  }
+  return 0;
+  
+
+}
 
 uint64
 sys_chdir(void)
