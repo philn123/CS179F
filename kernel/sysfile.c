@@ -596,6 +596,5 @@ uint64 sys_munmap()
     fileclose(map->file);
   }
 
-  //cum
   return 0;
 }
