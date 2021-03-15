@@ -1,0 +1,914 @@
+diff --git a/Makefile b/Makefile
+index a074a80..32d7260 100644
+--- a/Makefile
++++ b/Makefile
+@@ -143,6 +143,7 @@ UPROGS=\
+ 	$U/_bcachetest\
+ 	$U/_alloctest\
+ 	$U/_bigfile\
++	$U/_mmaptest\
+ 
+ fs.img: mkfs/mkfs README user/xargstest.sh $(UPROGS)
+ 	mkfs/mkfs fs.img README user/xargstest.sh $(UPROGS)
+diff --git a/group1_5.diff b/group1_5.diff
+new file mode 100644
+index 0000000..d3da1d5
+--- /dev/null
++++ b/group1_5.diff
+@@ -0,0 +1,448 @@
++diff --git a/Makefile b/Makefile
++index a074a80..32d7260 100644
++--- a/Makefile
+++++ b/Makefile
++@@ -143,6 +143,7 @@ UPROGS=\
++ 	$U/_bcachetest\
++ 	$U/_alloctest\
++ 	$U/_bigfile\
+++	$U/_mmaptest\
++ 
++ fs.img: mkfs/mkfs README user/xargstest.sh $(UPROGS)
++ 	mkfs/mkfs fs.img README user/xargstest.sh $(UPROGS)
++diff --git a/kernel/fcntl.h b/kernel/fcntl.h
++index d565483..4cd2786 100644
++--- a/kernel/fcntl.h
+++++ b/kernel/fcntl.h
++@@ -2,3 +2,7 @@
++ #define O_WRONLY  0x001
++ #define O_RDWR    0x002
++ #define O_CREATE  0x200
+++#define PROT_READ 0x000
+++#define PROT_WRITE 0x001
+++#define MAP_PRIVATE 0x000
+++#define MAP_SHARED 0x001
++\ No newline at end of file
++diff --git a/kernel/proc.c b/kernel/proc.c
++index c678813..591d117 100644
++--- a/kernel/proc.c
+++++ b/kernel/proc.c
++@@ -8,6 +8,7 @@
++ #include "file.h"
++ #include "proc.h"
++ #include "defs.h"
+++#include "fcntl.h"
++ 
++ struct cpu cpus[NCPU];
++ 
++@@ -265,6 +266,36 @@ fork(void)
++ 
++   np->parent = p;
++ 
+++  for (int i = 0; i < 16; i++)
+++  {
+++    if(p->vma_table[i].visited == 1)
+++    {
+++      struct vma *parent = &p->vma_table[i];
+++      struct vma *child = 0;
+++      parent->file = filedup(parent->file);
+++      for(int j = 0; j < 16; j++)
+++      {
+++        if(np->vma_table[j].visited == 0)
+++        {
+++          child = &np->vma_table[j];
+++          break;
+++        }
+++      }
+++
+++      if(child)
+++      {
+++        child->visited = 1;
+++        child->start = parent->start;
+++        child->end = parent->end;
+++        child->length = parent->length;
+++        child->prot = parent->prot;
+++        child->flags = parent->flags;
+++        child->offset = parent->offset;
+++        child->file = parent->file;
+++      }
+++    }
+++  }
+++
++   // copy saved user registers.
++   *(np->tf) = *(p->tf);
++ 
++@@ -334,6 +365,31 @@ exit(int status)
++     }
++   }
++ 
+++  struct vma *map = 0;
+++  for(int i = 0; i < 16; i++)
+++  {
+++    if(p->vma_table[i].visited)
+++    {
+++      map = &p->vma_table[i];
+++      map-> visited = 0;
+++
+++      if(walkaddr(p->pagetable, map->start))
+++      {
+++        if(map->flags & MAP_SHARED)
+++        {
+++          filewrite(map->file, map->start, map->length);
+++        }
+++        uvmunmap(p->pagetable, map->start, map->length, 0);
+++      }
+++      map->start += map->length;
+++      if(map->start == map->end)
+++      {
+++        map->visited = 0;
+++        fileclose(map->file);
+++      }
+++    }
+++  }
+++
++   begin_op(ROOTDEV);
++   iput(p->cwd);
++   end_op(ROOTDEV);
++diff --git a/kernel/proc.h b/kernel/proc.h
++index 812c769..34dc87e 100644
++--- a/kernel/proc.h
+++++ b/kernel/proc.h
++@@ -82,6 +82,19 @@ struct trapframe {
++ 
++ enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
++ 
+++#define MMAP_START PGROUNDDOWN(MAXVA / 2)
+++struct vma {
+++  int visited;
+++  uint64 start;
+++  uint64 end;
+++  int flags;
+++  int prot;
+++  int fd;
+++  int length;
+++  int offset;
+++  struct file *file;
+++};
+++
++ // Per-process state
++ struct proc {
++   struct spinlock lock;
++@@ -103,4 +116,5 @@ struct proc {
++   struct file *ofile[NOFILE];  // Open files
++   struct inode *cwd;           // Current directory
++   char name[16];               // Process name (debugging)
+++  struct vma vma_table[16];
++ };
++diff --git a/kernel/syscall.c b/kernel/syscall.c
++index ec78f3d..d0edb54 100644
++--- a/kernel/syscall.c
+++++ b/kernel/syscall.c
++@@ -105,6 +105,8 @@ extern uint64 sys_wait(void);
++ extern uint64 sys_write(void);
++ extern uint64 sys_uptime(void);
++ extern uint64 sys_ntas(void);
+++extern uint64 sys_mmap(void);
+++extern uint64 sys_munmap(void);
++ 
++ static uint64 (*syscalls[])(void) = {
++ [SYS_fork]    sys_fork,
++@@ -129,6 +131,8 @@ static uint64 (*syscalls[])(void) = {
++ [SYS_mkdir]   sys_mkdir,
++ [SYS_close]   sys_close,
++ [SYS_ntas]    sys_ntas,
+++[SYS_mmap] sys_mmap,
+++[SYS_munmap] sys_munmap,
++ };
++ 
++ void
++diff --git a/kernel/syscall.h b/kernel/syscall.h
++index d329a6c..1841488 100644
++--- a/kernel/syscall.h
+++++ b/kernel/syscall.h
++@@ -23,3 +23,5 @@
++ 
++ // System calls for labs
++ #define SYS_ntas   22
+++#define SYS_mmap 23
+++#define SYS_munmap 24
++\ No newline at end of file
++diff --git a/kernel/sysfile.c b/kernel/sysfile.c
++index 032a164..cee2b17 100644
++--- a/kernel/sysfile.c
+++++ b/kernel/sysfile.c
++@@ -483,3 +483,119 @@ sys_pipe(void)
++   return 0;
++ }
++ 
+++uint64 sys_mmap()
+++{
+++  uint64 start;
+++  int fd;
+++  int length;
+++  int prot;
+++  int flags;
+++  struct file *f;
+++  int offset;
+++  int i;
+++  struct proc *p = myproc();
+++
+++  if(argaddr(0, &start) < 0 || argint(1, &length) < 0 ||
+++    argint(2, &prot) < 0 || argint(3, &flags) < 0 ||
+++    argfd(4,&fd, &f) < 0 || argint (5, &offset) < 0)
+++    {
+++      return -1;
+++    }
+++
+++  //printf("%p\n", MMAP_START + PGSIZE);
+++  // check addr & offset to make sure they are zero
+++  if(start != 0 || offset != 0)
+++  {
+++    return -1;
+++  }
+++
+++  if(!f->writable && (prot & PROT_WRITE) && (flags & MAP_SHARED)){
+++    return -1;
+++  }
+++
+++  struct vma *map = 0;
+++
+++  for(i = 0; i < 16; i++)
+++  {
+++    if(!p->vma_table[i].visited)
+++    {
+++      map = &p->vma_table[i];
+++      map->visited = 1;
+++      break;
+++    }
+++  }
+++
+++  if(map)
+++  {
+++    if(i == 0)
+++    {
+++      map->start = MMAP_START;
+++    }
+++    else
+++    {
+++      map->start = PGROUNDDOWN(p->vma_table[i-1].end + PGSIZE);
+++    }
+++    map->end = map->start + length;
+++    map->length = length;
+++    map->prot = prot;
+++    map->fd = fd;
+++    map->flags = flags;
+++    map->file = f;
+++    map->offset = offset;
+++
+++    filedup(map->file);
+++    return map->start;
+++
+++  }
+++  else
+++  {
+++    return - 1;
+++  }
+++  return -1;
+++}
+++
+++uint64 sys_munmap()
+++{
+++  uint64 addr;
+++  int length;
+++  struct proc *p = myproc();
+++  
+++  if(argaddr(0, &addr) < 0 || argint(1, &length) < 0)
+++  {
+++    return -1;
+++  }
+++
+++  struct vma *map = 0;
+++  for(int i = 0; i < 16; i++)
+++  {
+++    if(p->vma_table[i].start <= addr && addr <= p->vma_table[i].end)
+++        {
+++          map = &p->vma_table[i];
+++          break;
+++        }
+++  }
+++
+++  if(!map)
+++  {
+++    return -1;
+++  }
+++
+++  if(walkaddr(p->pagetable, map->start))
+++  {
+++    if(map->flags & MAP_SHARED)
+++    {
+++      filewrite(map->file, map->start, length);
+++    }
+++    uvmunmap(p->pagetable, map->start, length, 1);
+++  }
+++
+++  map->start += length;
+++  if(map->start == map->end)
+++  {
+++    map->visited = 0;
+++    fileclose(map->file);
+++  }
+++
+++  //cum
+++  return 0;
+++}
++\ No newline at end of file
++diff --git a/kernel/trap.c b/kernel/trap.c
++index ca07db5..f29293f 100644
++--- a/kernel/trap.c
+++++ b/kernel/trap.c
++@@ -5,6 +5,9 @@
++ #include "spinlock.h"
++ #include "proc.h"
++ #include "defs.h"
+++#include "sleeplock.h"
+++#include "fs.h"
+++#include "file.h"
++ 
++ struct spinlock tickslock;
++ uint ticks;
++@@ -71,11 +74,60 @@ usertrap(void)
++   } else if((which_dev = devintr()) != 0){
++     // ok
++   } else {
++-    printf("usertrap(): unexpected scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
++-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
++-    p->killed = 1;
+++
+++    if (r_scause() == 13 || r_scause() == 15)
+++    {
+++      uint64 fa = PGROUNDDOWN(r_stval());
+++      struct vma *map = 0;
+++      
+++      for(int i = 0; i < 16; i++)
+++      {
+++        if(p->vma_table[i].start <= fa && fa <= p->vma_table[i].end)
+++        {
+++          map = &p->vma_table[i];
+++          break;
+++        }
+++      }
+++
+++      //printf("%p\n", fa);
+++      
+++      if(!map)
+++      {
+++        p->killed = 1;
+++        goto exit;
+++      }
+++
+++      char *mem = kalloc();
+++      if(!mem)
+++      {
+++        p->killed = 1;
+++        goto exit;
+++      }
+++
+++      memset(mem, 0, PGSIZE);
+++
+++      struct file *f = map->file;
+++      int offset = fa - map->start;
+++
+++      ilock(f->ip);
+++      readi(f->ip, 0, (uint64)mem, offset, PGSIZE);
+++      iunlock(f->ip);
+++
+++      if(mappages(p->pagetable, fa, PGSIZE, (uint64)mem, map->prot|PTE_W|PTE_X|PTE_R|PTE_U) != 0)
+++      {
+++        kfree(mem);
+++        p->killed = 1;
+++        goto exit;
+++      }
+++    }
+++    else{
+++      printf("usertrap(): unexpected scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
+++      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+++      p->killed = 1;
+++    }
++   }
++ 
+++  exit:
++   if(p->killed)
++     exit(-1);
++ 
++diff --git a/kernel/vm.c b/kernel/vm.c
++index dd65184..d0fd17e 100644
++--- a/kernel/vm.c
+++++ b/kernel/vm.c
++@@ -188,10 +188,12 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
++   last = PGROUNDDOWN(va + size - 1);
++   for(;;){
++     if((pte = walk(pagetable, a, 0)) == 0)
++-      panic("uvmunmap: walk");
+++      goto end;
+++      //panic("uvmunmap: walk");
++     if((*pte & PTE_V) == 0){
++-      printf("va=%p pte=%p\n", a, *pte);
++-      panic("uvmunmap: not mapped");
+++      goto end;
+++      // printf("va=%p pte=%p\n", a, *pte);
+++      // panic("uvmunmap: not mapped");
++     }
++     if(PTE_FLAGS(*pte) == PTE_V)
++       panic("uvmunmap: not a leaf");
++@@ -200,6 +202,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
++       kfree((void*)pa);
++     }
++     *pte = 0;
+++    end:
++     if(a == last)
++       break;
++     a += PGSIZE;
++@@ -295,7 +298,8 @@ freewalk(pagetable_t pagetable)
++       freewalk((pagetable_t)child);
++       pagetable[i] = 0;
++     } else if(pte & PTE_V){
++-      panic("freewalk: leaf");
+++      //panic("freewalk: leaf");
+++      pagetable[i] = 0;
++     }
++   }
++   kfree((void*)pagetable);
++@@ -326,9 +330,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
++ 
++   for(i = 0; i < sz; i += PGSIZE){
++     if((pte = walk(old, i, 0)) == 0)
++-      panic("uvmcopy: pte should exist");
+++      continue;
+++      //anic("uvmcopy: pte should exist");
++     if((*pte & PTE_V) == 0)
++-      panic("uvmcopy: page not present");
+++      continue;
+++      //panic("uvmcopy: page not present");
++     pa = PTE2PA(*pte);
++     flags = PTE_FLAGS(*pte);
++     if((mem = kalloc()) == 0)
++diff --git a/user/user.h b/user/user.h
++index 9fa1921..5027e26 100644
++--- a/user/user.h
+++++ b/user/user.h
++@@ -27,6 +27,8 @@ int ntas();
++ int crash(const char*, int);
++ int mount(char*, char *);
++ int umount(char*);
+++void* mmap(void*, unsigned int, int, int, int, unsigned int);
+++int munmap(void*, unsigned int);
++ 
++ // ulib.c
++ int stat(const char*, struct stat*);
++diff --git a/user/usys.pl b/user/usys.pl
++index 1645c2b..ab1b681 100755
++--- a/user/usys.pl
+++++ b/user/usys.pl
++@@ -37,3 +37,5 @@ entry("sbrk");
++ entry("sleep");
++ entry("uptime");
++ entry("ntas");
+++entry("mmap"); 
+++entry("munmap");
++\ No newline at end of file
+diff --git a/kernel/fcntl.h b/kernel/fcntl.h
+index d565483..4cd2786 100644
+--- a/kernel/fcntl.h
++++ b/kernel/fcntl.h
+@@ -2,3 +2,7 @@
+ #define O_WRONLY  0x001
+ #define O_RDWR    0x002
+ #define O_CREATE  0x200
++#define PROT_READ 0x000
++#define PROT_WRITE 0x001
++#define MAP_PRIVATE 0x000
++#define MAP_SHARED 0x001
+\ No newline at end of file
+diff --git a/kernel/proc.c b/kernel/proc.c
+index c678813..2557ef0 100644
+--- a/kernel/proc.c
++++ b/kernel/proc.c
+@@ -8,6 +8,7 @@
+ #include "file.h"
+ #include "proc.h"
+ #include "defs.h"
++#include "fcntl.h"
+ 
+ struct cpu cpus[NCPU];
+ 
+@@ -123,6 +124,11 @@ found:
+   p->context.ra = (uint64)forkret;
+   p->context.sp = p->kstack + PGSIZE;
+ 
++  for (int i = 0; i < 16; i++)
++  {
++    p->vma_table[i].visited = 0;
++  }
++
+   return p;
+ }
+ 
+@@ -265,6 +271,36 @@ fork(void)
+ 
+   np->parent = p;
+ 
++  for (int i = 0; i < 16; i++)
++  {
++    if(p->vma_table[i].visited == 1)
++    {
++      struct vma *parent = &p->vma_table[i];
++      struct vma *child = 0;
++      parent->file = filedup(parent->file);
++      for(int j = 0; j < 16; j++)
++      {
++        if(np->vma_table[j].visited == 0)
++        {
++          child = &np->vma_table[j];
++          break;
++        }
++      }
++
++      if(child)
++      {
++        child->visited = 1;
++        child->start = parent->start;
++        child->end = parent->end;
++        child->length = parent->length;
++        child->prot = parent->prot;
++        child->flags = parent->flags;
++        child->offset = parent->offset;
++        child->file = parent->file;
++      }
++    }
++  }
++
+   // copy saved user registers.
+   *(np->tf) = *(p->tf);
+ 
+@@ -334,6 +370,31 @@ exit(int status)
+     }
+   }
+ 
++  struct vma *map = 0;
++  for(int i = 0; i < 16; i++)
++  {
++    if(p->vma_table[i].visited)
++    {
++      map = &p->vma_table[i];
++      map-> visited = 0;
++
++      if(walkaddr(p->pagetable, map->start))
++      {
++        if(map->flags & MAP_SHARED)
++        {
++          filewrite(map->file, map->start, map->length);
++        }
++        uvmunmap(p->pagetable, map->start, map->length, 0);
++      }
++      map->start += map->length;
++      if(map->start == map->end)
++      {
++        map->visited = 0;
++        fileclose(map->file);
++      }
++    }
++  }
++
+   begin_op(ROOTDEV);
+   iput(p->cwd);
+   end_op(ROOTDEV);
+diff --git a/kernel/proc.h b/kernel/proc.h
+index 812c769..34dc87e 100644
+--- a/kernel/proc.h
++++ b/kernel/proc.h
+@@ -82,6 +82,19 @@ struct trapframe {
+ 
+ enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+ 
++#define MMAP_START PGROUNDDOWN(MAXVA / 2)
++struct vma {
++  int visited;
++  uint64 start;
++  uint64 end;
++  int flags;
++  int prot;
++  int fd;
++  int length;
++  int offset;
++  struct file *file;
++};
++
+ // Per-process state
+ struct proc {
+   struct spinlock lock;
+@@ -103,4 +116,5 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
++  struct vma vma_table[16];
+ };
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index ec78f3d..d0edb54 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -105,6 +105,8 @@ extern uint64 sys_wait(void);
+ extern uint64 sys_write(void);
+ extern uint64 sys_uptime(void);
+ extern uint64 sys_ntas(void);
++extern uint64 sys_mmap(void);
++extern uint64 sys_munmap(void);
+ 
+ static uint64 (*syscalls[])(void) = {
+ [SYS_fork]    sys_fork,
+@@ -129,6 +131,8 @@ static uint64 (*syscalls[])(void) = {
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
+ [SYS_ntas]    sys_ntas,
++[SYS_mmap] sys_mmap,
++[SYS_munmap] sys_munmap,
+ };
+ 
+ void
+diff --git a/kernel/syscall.h b/kernel/syscall.h
+index d329a6c..1841488 100644
+--- a/kernel/syscall.h
++++ b/kernel/syscall.h
+@@ -23,3 +23,5 @@
+ 
+ // System calls for labs
+ #define SYS_ntas   22
++#define SYS_mmap 23
++#define SYS_munmap 24
+\ No newline at end of file
+diff --git a/kernel/sysfile.c b/kernel/sysfile.c
+index 032a164..cee2b17 100644
+--- a/kernel/sysfile.c
++++ b/kernel/sysfile.c
+@@ -483,3 +483,119 @@ sys_pipe(void)
+   return 0;
+ }
+ 
++uint64 sys_mmap()
++{
++  uint64 start;
++  int fd;
++  int length;
++  int prot;
++  int flags;
++  struct file *f;
++  int offset;
++  int i;
++  struct proc *p = myproc();
++
++  if(argaddr(0, &start) < 0 || argint(1, &length) < 0 ||
++    argint(2, &prot) < 0 || argint(3, &flags) < 0 ||
++    argfd(4,&fd, &f) < 0 || argint (5, &offset) < 0)
++    {
++      return -1;
++    }
++
++  //printf("%p\n", MMAP_START + PGSIZE);
++  // check addr & offset to make sure they are zero
++  if(start != 0 || offset != 0)
++  {
++    return -1;
++  }
++
++  if(!f->writable && (prot & PROT_WRITE) && (flags & MAP_SHARED)){
++    return -1;
++  }
++
++  struct vma *map = 0;
++
++  for(i = 0; i < 16; i++)
++  {
++    if(!p->vma_table[i].visited)
++    {
++      map = &p->vma_table[i];
++      map->visited = 1;
++      break;
++    }
++  }
++
++  if(map)
++  {
++    if(i == 0)
++    {
++      map->start = MMAP_START;
++    }
++    else
++    {
++      map->start = PGROUNDDOWN(p->vma_table[i-1].end + PGSIZE);
++    }
++    map->end = map->start + length;
++    map->length = length;
++    map->prot = prot;
++    map->fd = fd;
++    map->flags = flags;
++    map->file = f;
++    map->offset = offset;
++
++    filedup(map->file);
++    return map->start;
++
++  }
++  else
++  {
++    return - 1;
++  }
++  return -1;
++}
++
++uint64 sys_munmap()
++{
++  uint64 addr;
++  int length;
++  struct proc *p = myproc();
++  
++  if(argaddr(0, &addr) < 0 || argint(1, &length) < 0)
++  {
++    return -1;
++  }
++
++  struct vma *map = 0;
++  for(int i = 0; i < 16; i++)
++  {
++    if(p->vma_table[i].start <= addr && addr <= p->vma_table[i].end)
++        {
++          map = &p->vma_table[i];
++          break;
++        }
++  }
++
++  if(!map)
++  {
++    return -1;
++  }
++
++  if(walkaddr(p->pagetable, map->start))
++  {
++    if(map->flags & MAP_SHARED)
++    {
++      filewrite(map->file, map->start, length);
++    }
++    uvmunmap(p->pagetable, map->start, length, 1);
++  }
++
++  map->start += length;
++  if(map->start == map->end)
++  {
++    map->visited = 0;
++    fileclose(map->file);
++  }
++
++  //cum
++  return 0;
++}
+\ No newline at end of file
+diff --git a/kernel/trap.c b/kernel/trap.c
+index ca07db5..f29293f 100644
+--- a/kernel/trap.c
++++ b/kernel/trap.c
+@@ -5,6 +5,9 @@
+ #include "spinlock.h"
+ #include "proc.h"
+ #include "defs.h"
++#include "sleeplock.h"
++#include "fs.h"
++#include "file.h"
+ 
+ struct spinlock tickslock;
+ uint ticks;
+@@ -71,11 +74,60 @@ usertrap(void)
+   } else if((which_dev = devintr()) != 0){
+     // ok
+   } else {
+-    printf("usertrap(): unexpected scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
+-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+-    p->killed = 1;
++
++    if (r_scause() == 13 || r_scause() == 15)
++    {
++      uint64 fa = PGROUNDDOWN(r_stval());
++      struct vma *map = 0;
++      
++      for(int i = 0; i < 16; i++)
++      {
++        if(p->vma_table[i].start <= fa && fa <= p->vma_table[i].end)
++        {
++          map = &p->vma_table[i];
++          break;
++        }
++      }
++
++      //printf("%p\n", fa);
++      
++      if(!map)
++      {
++        p->killed = 1;
++        goto exit;
++      }
++
++      char *mem = kalloc();
++      if(!mem)
++      {
++        p->killed = 1;
++        goto exit;
++      }
++
++      memset(mem, 0, PGSIZE);
++
++      struct file *f = map->file;
++      int offset = fa - map->start;
++
++      ilock(f->ip);
++      readi(f->ip, 0, (uint64)mem, offset, PGSIZE);
++      iunlock(f->ip);
++
++      if(mappages(p->pagetable, fa, PGSIZE, (uint64)mem, map->prot|PTE_W|PTE_X|PTE_R|PTE_U) != 0)
++      {
++        kfree(mem);
++        p->killed = 1;
++        goto exit;
++      }
++    }
++    else{
++      printf("usertrap(): unexpected scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
++      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
++      p->killed = 1;
++    }
+   }
+ 
++  exit:
+   if(p->killed)
+     exit(-1);
+ 
+diff --git a/kernel/vm.c b/kernel/vm.c
+index dd65184..d0fd17e 100644
+--- a/kernel/vm.c
++++ b/kernel/vm.c
+@@ -188,10 +188,12 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
+   last = PGROUNDDOWN(va + size - 1);
+   for(;;){
+     if((pte = walk(pagetable, a, 0)) == 0)
+-      panic("uvmunmap: walk");
++      goto end;
++      //panic("uvmunmap: walk");
+     if((*pte & PTE_V) == 0){
+-      printf("va=%p pte=%p\n", a, *pte);
+-      panic("uvmunmap: not mapped");
++      goto end;
++      // printf("va=%p pte=%p\n", a, *pte);
++      // panic("uvmunmap: not mapped");
+     }
+     if(PTE_FLAGS(*pte) == PTE_V)
+       panic("uvmunmap: not a leaf");
+@@ -200,6 +202,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
+       kfree((void*)pa);
+     }
+     *pte = 0;
++    end:
+     if(a == last)
+       break;
+     a += PGSIZE;
+@@ -295,7 +298,8 @@ freewalk(pagetable_t pagetable)
+       freewalk((pagetable_t)child);
+       pagetable[i] = 0;
+     } else if(pte & PTE_V){
+-      panic("freewalk: leaf");
++      //panic("freewalk: leaf");
++      pagetable[i] = 0;
+     }
+   }
+   kfree((void*)pagetable);
+@@ -326,9 +330,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+ 
+   for(i = 0; i < sz; i += PGSIZE){
+     if((pte = walk(old, i, 0)) == 0)
+-      panic("uvmcopy: pte should exist");
++      continue;
++      //anic("uvmcopy: pte should exist");
+     if((*pte & PTE_V) == 0)
+-      panic("uvmcopy: page not present");
++      continue;
++      //panic("uvmcopy: page not present");
+     pa = PTE2PA(*pte);
+     flags = PTE_FLAGS(*pte);
+     if((mem = kalloc()) == 0)
+diff --git a/user/user.h b/user/user.h
+index 9fa1921..5027e26 100644
+--- a/user/user.h
++++ b/user/user.h
+@@ -27,6 +27,8 @@ int ntas();
+ int crash(const char*, int);
+ int mount(char*, char *);
+ int umount(char*);
++void* mmap(void*, unsigned int, int, int, int, unsigned int);
++int munmap(void*, unsigned int);
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+diff --git a/user/usys.pl b/user/usys.pl
+index 1645c2b..ab1b681 100755
+--- a/user/usys.pl
++++ b/user/usys.pl
+@@ -37,3 +37,5 @@ entry("sbrk");
+ entry("sleep");
+ entry("uptime");
+ entry("ntas");
++entry("mmap"); 
++entry("munmap");
+\ No newline at end of file
