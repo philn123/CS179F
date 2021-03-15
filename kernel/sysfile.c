@@ -483,3 +483,119 @@ sys_pipe(void)
   return 0;
 }
 
+uint64 sys_mmap()
+{
+  uint64 start;
+  int fd;
+  int length;
+  int prot;
+  int flags;
+  struct file *f;
+  int offset;
+  int i;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &start) < 0 || argint(1, &length) < 0 ||
+    argint(2, &prot) < 0 || argint(3, &flags) < 0 ||
+    argfd(4,&fd, &f) < 0 || argint (5, &offset) < 0)
+    {
+      return -1;
+    }
+
+  //printf("%p\n", MMAP_START + PGSIZE);
+  // check addr & offset to make sure they are zero
+  if(start != 0 || offset != 0)
+  {
+    return -1;
+  }
+
+  if(!f->writable && (prot & PROT_WRITE) && (flags & MAP_SHARED)){
+    return -1;
+  }
+
+  struct vma *map = 0;
+
+  for(i = 0; i < 16; i++)
+  {
+    if(!p->vma_table[i].visited)
+    {
+      map = &p->vma_table[i];
+      map->visited = 1;
+      break;
+    }
+  }
+
+  if(map)
+  {
+    if(i == 0)
+    {
+      map->start = MMAP_START;
+    }
+    else
+    {
+      map->start = PGROUNDDOWN(p->vma_table[i-1].end + PGSIZE);
+    }
+    map->end = map->start + length;
+    map->length = length;
+    map->prot = prot;
+    map->fd = fd;
+    map->flags = flags;
+    map->file = f;
+    map->offset = offset;
+
+    filedup(map->file);
+    return map->start;
+
+  }
+  else
+  {
+    return - 1;
+  }
+  return -1;
+}
+
+uint64 sys_munmap()
+{
+  uint64 addr;
+  int length;
+  struct proc *p = myproc();
+  
+  if(argaddr(0, &addr) < 0 || argint(1, &length) < 0)
+  {
+    return -1;
+  }
+
+  struct vma *map = 0;
+  for(int i = 0; i < 16; i++)
+  {
+    if(p->vma_table[i].start <= addr && addr <= p->vma_table[i].end)
+        {
+          map = &p->vma_table[i];
+          break;
+        }
+  }
+
+  if(!map)
+  {
+    return -1;
+  }
+
+  if(walkaddr(p->pagetable, map->start))
+  {
+    if(map->flags & MAP_SHARED)
+    {
+      filewrite(map->file, map->start, length);
+    }
+    uvmunmap(p->pagetable, map->start, length, 1);
+  }
+
+  map->start += length;
+  if(map->start == map->end)
+  {
+    map->visited = 0;
+    fileclose(map->file);
+  }
+
+  //cum
+  return 0;
+}
