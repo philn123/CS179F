@@ -10,6 +10,9 @@ index a074a80..32d7260 100644
  
  fs.img: mkfs/mkfs README user/xargstest.sh $(UPROGS)
  	mkfs/mkfs fs.img README user/xargstest.sh $(UPROGS)
+diff --git a/group1.diff b/group1.diff
+new file mode 100644
+index 0000000..e69de29
 diff --git a/group1_5.diff b/group1_5.diff
 new file mode 100644
 index 0000000..d3da1d5
@@ -634,10 +637,10 @@ index d329a6c..1841488 100644
 +#define SYS_munmap 24
 \ No newline at end of file
 diff --git a/kernel/sysfile.c b/kernel/sysfile.c
-index 032a164..cee2b17 100644
+index 032a164..bc7de8d 100644
 --- a/kernel/sysfile.c
 +++ b/kernel/sysfile.c
-@@ -483,3 +483,119 @@ sys_pipe(void)
+@@ -483,3 +483,118 @@ sys_pipe(void)
    return 0;
  }
  
@@ -754,7 +757,6 @@ index 032a164..cee2b17 100644
 +    fileclose(map->file);
 +  }
 +
-+  //cum
 +  return 0;
 +}
 \ No newline at end of file
