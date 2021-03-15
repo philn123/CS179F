@@ -24,7 +24,7 @@ index d565483..4cd2786 100644
 +#define MAP_SHARED 0x001
 \ No newline at end of file
 diff --git a/kernel/proc.c b/kernel/proc.c
-index c678813..591d117 100644
+index c678813..2557ef0 100644
 --- a/kernel/proc.c
 +++ b/kernel/proc.c
 @@ -8,6 +8,7 @@
@@ -35,7 +35,19 @@ index c678813..591d117 100644
  
  struct cpu cpus[NCPU];
  
-@@ -265,6 +266,36 @@ fork(void)
+@@ -123,6 +124,11 @@ found:
+   p->context.ra = (uint64)forkret;
+   p->context.sp = p->kstack + PGSIZE;
+ 
++  for (int i = 0; i < 16; i++)
++  {
++    p->vma_table[i].visited = 0;
++  }
++
+   return p;
+ }
+ 
+@@ -265,6 +271,36 @@ fork(void)
  
    np->parent = p;
  
@@ -72,7 +84,7 @@ index c678813..591d117 100644
    // copy saved user registers.
    *(np->tf) = *(p->tf);
  
-@@ -334,6 +365,31 @@ exit(int status)
+@@ -334,6 +370,31 @@ exit(int status)
      }
    }
  
@@ -168,10 +180,10 @@ index d329a6c..1841488 100644
 +#define SYS_munmap 24
 \ No newline at end of file
 diff --git a/kernel/sysfile.c b/kernel/sysfile.c
-index 032a164..cee2b17 100644
+index 032a164..bc7de8d 100644
 --- a/kernel/sysfile.c
 +++ b/kernel/sysfile.c
-@@ -483,3 +483,119 @@ sys_pipe(void)
+@@ -483,3 +483,118 @@ sys_pipe(void)
    return 0;
  }
  
@@ -288,7 +300,6 @@ index 032a164..cee2b17 100644
 +    fileclose(map->file);
 +  }
 +
-+  //cum
 +  return 0;
 +}
 \ No newline at end of file
